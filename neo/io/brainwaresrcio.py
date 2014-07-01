@@ -141,6 +141,10 @@ class BrainwareSrcIO(BaseIO):
 
     mode = 'file'
 
+    # If True, optimized code paths are enabled.
+    # Should only be disabled for debugging and benchmarking purposes.
+    _use_optim = True
+
     def __init__(self, filename=None):
         """
         Arguments:
@@ -424,15 +428,7 @@ class BrainwareSrcIO(BaseIO):
         method or by other private methods, since they depend on the
         current position in the file.
         """
-
-        try:
-            # uint16 -- the ID code of the next sequence
-            seqid = np.asscalar(np.fromfile(self._fsrc,
-                                            dtype=np.uint16, count=1))
-        except ValueError:
-            # return a None if at EOF.  Other methods use None to recognize
-            # an EOF
-            return None
+        seqid = self._get_id()
 
         # using the seqid, get the reader function from the reader dict
         readfunc = self._ID_DICT.get(seqid)
@@ -469,6 +465,25 @@ class BrainwareSrcIO(BaseIO):
     #   unlikely to work properly if used with another file format.
     # -------------------------------------------------------------------------
     # -------------------------------------------------------------------------
+
+    def _get_id(self, rewind=False):
+        """
+        Reader for ID codes data
+
+        BrainWare SRC files are broken up into data sequences that are
+        identified by an ID code.  This method determines the ID code.  See the
+        _ID_DICT attribute for a dictionary of code/method pairs.
+        """
+        try:
+            # uint16 -- the ID code of the next sequence
+            val = np.fromfile(self._fsrc, dtype=np.uint16, count=1)[0]
+        except ValueError:
+            # return a None if at EOF.  Other methods use None to recognize
+            # an EOF
+            val = None
+        if rewind:
+            self._fsrc.seek(-2, 1)
+        return val
 
     def _assign_sequence(self, data_obj):
         """
@@ -575,12 +590,14 @@ class BrainwareSrcIO(BaseIO):
         if not spiketrains:
             return self._default_spiketrain.copy()
 
+        if hasattr(spiketrains, 'waveforms'):
+            if self._lazy and not hasattr(spiketrains, 'lazy_shape'):
+                spiketrains.lazy_shape = spiketrains.shape
+                spiketrains = spiketrains[:0]
+            return spiketrains
+
         if hasattr(spiketrains[0], 'waveforms') and len(spiketrains) == 1:
-            train = spiketrains[0]
-            if self._lazy and not hasattr(train, 'lazy_shape'):
-                train.lazy_shape = train.shape
-                train = train[:0]
-            return train
+            return self._combine_spiketrains(spiketrains[0])
 
         if hasattr(spiketrains[0], 't_stop'):
             # workaround for bug in some broken files
@@ -711,8 +728,7 @@ class BrainwareSrcIO(BaseIO):
             self._fsrc.seek(1, 1)
 
             # uint8 -- length of next string
-            numchars = np.asscalar(np.fromfile(self._fsrc,
-                                               dtype=np.uint8, count=1))
+            numchars = np.fromfile(self._fsrc, dtype=np.uint8, count=1)[0]
 
             # if there is no name, make one up
             if not numchars:
@@ -783,15 +799,13 @@ class BrainwareSrcIO(BaseIO):
         time = np.fromfile(self._fsrc, dtype=np.double, count=1)[0]
 
         # int16 -- length of next string
-        numchars1 = np.asscalar(np.fromfile(self._fsrc,
-                                            dtype=np.int16, count=1))
+        numchars1 = np.fromfile(self._fsrc, dtype=np.int16, count=1)[0]
 
         # char * numchars -- the one who sent the comment
         sender = self.__read_str(numchars1)
 
         # int16 -- length of next string
-        numchars2 = np.asscalar(np.fromfile(self._fsrc,
-                                            dtype=np.int16, count=1))
+        numchars2 = np.fromfile(self._fsrc, dtype=np.int16, count=1)[0]
 
         # char * numchars -- comment text
         text = self.__read_str(numchars2, utf=False)
@@ -855,18 +869,10 @@ class BrainwareSrcIO(BaseIO):
             seq_list = []
 
             # uint16 -- the ID of the next sequence
-            seqidinit = np.fromfile(self._fsrc, dtype=np.uint16, count=1)[0]
-
-            # {rewind} = byte * 2 (int16) -- move back 2 bytes, i.e. go back to
-            # before the beginning of the seqid
-            self._fsrc.seek(-2, 1)
+            seqidinit = self._get_id(rewind=True)
             while 1:
                 # uint16 -- the ID of the next sequence
-                seqid = np.fromfile(self._fsrc, dtype=np.uint16, count=1)[0]
-
-                # {rewind} = byte * 2 (int16) -- move back 2 bytes, i.e. go
-                # back to before the beginning of the seqid
-                self._fsrc.seek(-2, 1)
+                seqid = self._get_id(rewind=True)
 
                 # if we come across a new sequence, we are at the end of the
                 # list so we should stop
@@ -1023,11 +1029,7 @@ class BrainwareSrcIO(BaseIO):
         segments = self.__read_segment_list_var()
 
         # uint16 -- the ID of the next sequence
-        seqid = np.fromfile(self._fsrc, dtype=np.uint16, count=1)[0]
-
-        # {rewind} = byte * 2 (int16) -- move back 2 bytes, i.e. go back to
-        # before the beginning of the seqid
-        self._fsrc.seek(-2, 1)
+        seqid = self._get_id(rewind=True)
 
         if seqid in self._ID_DICT:
             # if it is a valid seqid, read it and try to figure out where
@@ -1041,6 +1043,10 @@ class BrainwareSrcIO(BaseIO):
         self._fsrc.seek(2, 1)
 
         return segments
+
+    _segment_list_v9_dtype = np.dtype([('f', np.uint8),
+                                       ('c', np.bool8),
+                                       ('b', np.bool8)])
 
     def __read_segment_list_v9(self):
         """
@@ -1062,22 +1068,16 @@ class BrainwareSrcIO(BaseIO):
         # segment_collection_v8 -- this is based off a segment_collection_v8
         segments = self.__read_segment_list_v8()
 
-        # uint8
-        feature_type = np.fromfile(self._fsrc, dtype=np.uint8,
-                                   count=1)[0]
-
-        # uint8
-        go_by_closest_unit_center = np.fromfile(self._fsrc, dtype=np.bool8,
-                                                count=1)[0]
-
-        # uint8
-        include_unit_bounds = np.fromfile(self._fsrc, dtype=np.bool8,
-                                          count=1)[0]
+        # uint8 -- feature_type
+        # uint8 -- go_by_closest_unit_center
+        # uint8 -- include_unit_bounds
+        data = np.fromfile(self._fsrc, dtype=self._segment_list_v9_dtype,
+                           count=1)
 
         # create a dictionary of the annotations
-        annotations = {'feature_type': feature_type,
-                       'go_by_closest_unit_center': go_by_closest_unit_center,
-                       'include_unit_bounds': include_unit_bounds}
+        annotations = {'feature_type': data['f'][0, 0],
+                       'go_by_closest_unit_center': data['c'][0, 0],
+                       'include_unit_bounds': data['b'][0, 0]}
 
         # add the annotations to each Segment
         for segment in segments:
@@ -1116,7 +1116,16 @@ class BrainwareSrcIO(BaseIO):
 
         return segments
 
-    def __read_spike_fixed(self, numpts=40):
+    _spike_fixed_dtype = np.dtype([('t', np.float32),
+                                   ('w', np.int8, (1, 1, 40)),
+                                   ('g', np.uint8)])
+
+    _spike_fixed_id_dtype = np.dtype([('i', np.uint16),
+                                      ('t', np.float32),
+                                      ('w', np.int8, (1, 1, 40)),
+                                      ('g', np.uint8)])
+
+    def __read_spike_fixed(self):
         """
         Read a spike with a fixed waveform length (40 time bins)
 
@@ -1130,16 +1139,50 @@ class BrainwareSrcIO(BaseIO):
         """
 
         # float32 -- spike time stamp in ms since start of SpikeTrain
-        time = np.fromfile(self._fsrc, dtype=np.float32, count=1)
-
         # int8 * 40 -- spike shape -- use numpts for spike_var
-        waveform = np.fromfile(self._fsrc, dtype=np.int8,
-                               count=numpts).reshape(1, 1, numpts)
-
         # uint8 -- point of return to noise
-        trig2 = np.fromfile(self._fsrc, dtype=np.uint8, count=1)
+        data = np.fromfile(self._fsrc, dtype=self._spike_fixed_dtype,
+                           count=1)
+        return data['t'][0], data['w'][0], data['g'][0]
 
-        return time, waveform, trig2
+    def __read_spike_fixed_list(self, n):
+        """
+        Read a list of spike swith a fixed waveform length (40 time bins)
+
+        -------------------------------------------
+        An optimized version of __read_spike_fixed that reads in a whole
+        list of spikes at once.
+
+        Returns None if the read fails or is invalid for whatever reason.
+
+        Returns a SpikeTrain object.
+
+        ID: 29079
+        """
+        place = self._fsrc.tell()
+        try:
+            data = np.fromfile(self._fsrc, dtype=self._spike_fixed_id_dtype,
+                               count=n)
+        except:
+            self._fsrc.seek(place)
+            return None
+        ids = data['i']
+        if len(ids.unique()) > 1 or ids[0] != 29079:
+            self._fsrc.seek(place)
+            return None
+
+        times = data['t']
+        waveforms = data['w']
+        trigs = data['g']
+
+        SpikeTrain(times, waveforms=waveforms, trig2=trigs)
+
+    _spike_fixed_old_dtype = np.dtype([('t', np.int32),
+                                       ('w', np.int8, (1, 1, 40))])
+
+    _spike_fixed_old_id_dtype = np.dtype([('i', np.uint16),
+                                          ('t', np.int32),
+                                          ('w', np.int8, (1, 1, 40))])
 
     def __read_spike_fixed_old(self):
         """
@@ -1158,19 +1201,52 @@ class BrainwareSrcIO(BaseIO):
         """
 
         # int32 -- spike time stamp in ms since start of SpikeTrain
-        time = np.fromfile(self._fsrc, dtype=np.int32, count=1) / 25.
-        time = time.astype(np.float32)
-
         # int8 * 40 -- spike shape
         # This needs to be a 3D array, one for each channel.  BrainWare
         # only ever has a single channel per file.
-        waveform = np.fromfile(self._fsrc, dtype=np.int8,
-                               count=40).reshape(1, 1, 40)
+        data = np.fromfile(self._fsrc, dtype=self._spike_fixed_old_dtype,
+                           count=1)
 
         # create a dummy trig2 value
-        trig2 = np.array([-1], dtype=np.uint8)
+        trig2 = np.array([0], dtype=np.uint8)
 
-        return time, waveform, trig2
+        return (data['t']/25.).astype(np.float32)[0], data['w'][0], trig2
+
+    def __read_spike_fixed_old_list(self, n):
+        """
+        Read a list of spike swith a fixed waveform length (40 time bins)
+
+        This is an old version of the format.  The time is stored as ints
+        representing 1/25 ms time steps.  It has no trigger information.
+
+        -------------------------------------------
+        An optimized version of __read_spike_fixed_old that reads in a whole
+        list of spikes at once.
+
+        Returns None if the read fails or is invalid for whatever reason.
+
+        Returns a SpikeTrain object.
+
+        ID: 29081
+        """
+        place = self._fsrc.tell()
+        try:
+            data = np.fromfile(self._fsrc,
+                               dtype=self._spike_fixed_old_id_dtype,
+                               count=n)
+        except:
+            self._fsrc.seek(place)
+            return None
+        ids = data['i']
+        if len(ids.unique()) > 1 or ids[0] != 29081:
+            self._fsrc.seek(place)
+            return None
+
+        times = data['t']
+        waveforms = data['w']
+        trigs = np.zeros_like(times, dtype=np.uint8)
+
+        SpikeTrain(times, waveforms=waveforms, trig2=trigs)
 
     def __read_spike_var(self):
         """
@@ -1188,9 +1264,64 @@ class BrainwareSrcIO(BaseIO):
         # uint8 -- number of points in spike shape
         numpts = np.fromfile(self._fsrc, dtype=np.uint8, count=1)[0]
 
-        # spike_fixed is the same as spike_var if you don't read the numpts
-        # byte and set numpts = 40
-        return self.__read_spike_fixed(numpts)
+        # float32 -- spike time stamp in ms since start of SpikeTrain
+        time = np.fromfile(self._fsrc, dtype=np.float32, count=1)
+
+        # int8 * 40 -- spike shape -- use numpts for spike_var
+        waveform = np.fromfile(self._fsrc, dtype=(np.int8, (1, 1, numpts)),
+                               count=1)[0]
+
+        # uint8 -- point of return to noise
+        trig2 = np.fromfile(self._fsrc, dtype=np.uint8, count=1)
+
+        return time, waveform, trig2
+
+    def __read_spike_var_list(self, n):
+        """
+        Read a list of spikes with a variable waveform length
+
+        -------------------------------------------
+        An optimized version of __read_spike_var that reads in a whole
+        list of spikes at once.
+
+        Returns None if the read fails or is invalid for whatever reason.
+
+        Returns a SpikeTrain object.
+
+        ID: 29115
+        """
+        place = self._fsrc.tell()
+        # uint8 -- number of points in spike shape
+        numpts = np.fromfile(self._fsrc, dtype=np.uint8, count=1)[0]
+        self._fsrc.seek(place)
+
+        _spike_spike_var_id_dtype = np.dtype([('i', np.uint16),
+                                              ('n', np.uint8),
+                                              ('t', np.float32),
+                                              ('w', np.int8, (1, 1, numpts)),
+                                              ('g', np.uint8)])
+        try:
+            data = np.fromfile(self._fsrc,
+                               dtype=self._spike_spike_var_id_dtype,
+                               count=n)
+        except:
+            self._fsrc.seek(place)
+            return None
+
+        ids = data['i']
+        if len(ids.unique()) > 1 or ids[0] != 29081:
+            self._fsrc.seek(place)
+            return None
+
+        if len(data['n'].unique()) > 1:
+            self._fsrc.seek(place)
+            return None
+
+        times = data['t']
+        waveforms = data['w']
+        trigs = data['g']
+
+        SpikeTrain(times, waveforms=waveforms, trig2=trigs)
 
     def __read_spiketrain_indexed(self):
         """
@@ -1448,8 +1579,7 @@ class BrainwareSrcIO(BaseIO):
         self._fsrc.seek(2, 1)
 
         # uint16 -- number of characters in next string
-        numchars = np.asscalar(np.fromfile(self._fsrc,
-                                           dtype=np.uint16, count=1))
+        numchars = np.fromfile(self._fsrc, dtype=np.uint16, count=1)[0]
 
         # char * numchars -- ID string of Unit
         name = self.__read_str(numchars)
@@ -1557,6 +1687,10 @@ class BrainwareSrcIO(BaseIO):
                 29120: __read_segment_list_v9,
                 29121: __read_spiketrain_indexed
                 }
+
+    _ID_DICT_OPTIM = {29079: __read_spike_fixed_list,
+                      29081: __read_spike_fixed_old_list,
+                      29115: __read_spike_var_list}
 
 
 def convert_brainwaresrc_timestamp(timestamp,
