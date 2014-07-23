@@ -311,14 +311,14 @@ class BrainwareSrcIOTestCase(BaseTestIO, unittest.TestCase):
             obj_reader_next = create_generic_reader(ioobj, target='next_block')
             obj_reader_single = create_generic_reader(ioobj)
 
-            obj_all = obj_reader_all()
-            obj_base = obj_reader_base()
-            obj_single = obj_reader_single()
-            obj_next = [obj_reader_next()]
-            while ioobj._isopen:
-                obj_next.append(obj_reader_next())
-
             try:
+                obj_all = obj_reader_all()
+                obj_base = obj_reader_base()
+                obj_single = obj_reader_single()
+                obj_next = [obj_reader_next()]
+                while ioobj._isopen:
+                    obj_next.append(obj_reader_next())
+
                 assert_same_sub_schema(obj_all[0], obj_base)
                 assert_same_sub_schema(obj_all[0], obj_single)
                 assert_same_sub_schema(obj_all, obj_next)
