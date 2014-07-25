@@ -267,7 +267,7 @@ def proc_src_condition_unit_repetition(sweep, damaIndex, timeStamp, sweepLen,
     t_stop = pq.Quantity(sweepLen, units=pq.ms, dtype=np.float32)
     trig2 = pq.Quantity(trig2, units=pq.ms, dtype=np.uint8)
     waveforms = pq.Quantity(shapes, dtype=np.int8, units=pq.mV)
-    sampling_period = pq.Quantity(ADperiod, units=pq.us)
+    sampling_rate = (1./pq.Quantity(ADperiod, units=pq.us)).rescale(pq.Hz)
 
     train = SpikeTrain(times=times, t_start=t_start, t_stop=t_stop,
                        trig2=trig2, dtype=np.float32, timestamp=timeStamp,
@@ -275,7 +275,7 @@ def proc_src_condition_unit_repetition(sweep, damaIndex, timeStamp, sweepLen,
                        respwin=respWin, waveforms=waveforms,
                        file_origin=filename)
     train.annotations['side'] = side
-    train.sampling_period = sampling_period
+    train.sampling_rate = sampling_rate
     return train
 
 
