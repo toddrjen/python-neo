@@ -122,7 +122,7 @@ class AnalogSignalArray(BaseAnalogSignal):
     '''
 
     _single_parent_objects = ('Segment', 'RecordingChannelGroup')
-    _quantity_attr = 'signal'
+    _main_attr = 'signal'
     _necessary_attrs = (('signal', pq.Quantity, 2),
                        ('sampling_rate', pq.Quantity, 0),
                        ('t_start', pq.Quantity, 0))

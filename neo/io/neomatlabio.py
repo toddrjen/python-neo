@@ -283,8 +283,8 @@ class NeoMatlabIO(BaseIO):
                 #~ struct['units'] = ob.dimensionality.string
                 #~ continue
 
-            if (hasattr(ob, '_quantity_attr') and
-                    ob._quantity_attr == attrname):
+            if (hasattr(ob, '_main_attr') and
+                    ob._main_attr == attrname):
                 struct[attrname] = ob.magnitude
                 struct[attrname+'_units'] = ob.dimensionality.string
                 continue
@@ -315,11 +315,11 @@ class NeoMatlabIO(BaseIO):
             #~ if attr[0] == '' and attr[1] == pq.Quantity:
                 #~ is_quantity = True
                 #~ break
-        #~ is_quantiy = hasattr(cl, '_quantity_attr')
+        #~ is_quantiy = hasattr(cl, '_main_attr')
 
         #~ if is_quantity:
-        if hasattr(cl, '_quantity_attr'):
-            quantity_attr = cl._quantity_attr
+        if hasattr(cl, '_main_attr'):
+            quantity_attr = cl._main_attr
             arr = getattr(struct, quantity_attr)
             #~ data_complement = dict(units=str(struct.units))
             data_complement = dict(units=str(
@@ -371,8 +371,8 @@ class NeoMatlabIO(BaseIO):
             if attrname.endswith('_units') or attrname == 'units':
                 # linked with another field
                 continue
-            if (hasattr(cl, '_quantity_attr') and
-                    cl._quantity_attr == attrname):
+            if (hasattr(cl, '_main_attr') and
+                    cl._main_attr == attrname):
                 continue
 
             item = getattr(struct, attrname)

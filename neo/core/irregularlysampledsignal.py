@@ -102,7 +102,7 @@ class IrregularlySampledSignal(BaseNeo, pq.Quantity):
     '''
 
     _single_parent_objects = ('Segment', 'RecordingChannel')
-    _quantity_attr = 'signal'
+    _main_attr = 'signal'
     _necessary_attrs = (('times', pq.Quantity, 1),
                        ('signal', pq.Quantity, 1))
 

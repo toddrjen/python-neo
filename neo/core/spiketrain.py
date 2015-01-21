@@ -174,7 +174,7 @@ class SpikeTrain(BaseNeo, pq.Quantity):
     '''
 
     _single_parent_objects = ('Segment', 'Unit')
-    _quantity_attr = 'times'
+    _main_attr = 'times'
     _necessary_attrs = (('times', pq.Quantity, 1),
                        ('t_start', pq.Quantity, 0),
                        ('t_stop', pq.Quantity, 0))

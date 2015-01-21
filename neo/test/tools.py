@@ -110,7 +110,7 @@ def assert_neo_object_is_compliant(ob):
     for ioattr in ob._necessary_attrs:
         attrname, attrtype = ioattr[0], ioattr[1]
         #~ if attrname != '':
-        if not hasattr(ob, '_quantity_attr'):
+        if not hasattr(ob, '_main_attr'):
             assert hasattr(ob, attrname), '%s neo obect does not have %s' % \
                 (classname, attrname)
 
@@ -118,8 +118,8 @@ def assert_neo_object_is_compliant(ob):
     for ioattr in ob._all_attrs:
         attrname, attrtype = ioattr[0], ioattr[1]
 
-        if (hasattr(ob, '_quantity_attr') and
-                ob._quantity_attr == attrname and
+        if (hasattr(ob, '_main_attr') and
+                ob._main_attr == attrname and
                 (attrtype == pq.Quantity or attrtype == np.ndarray)):
             # object inherits from Quantity (AnalogSIgnal, SpikeTrain, ...)
             ndim = ioattr[2]
@@ -274,7 +274,7 @@ def assert_same_attributes(ob1, ob2, equal_almost=True, threshold=1e-10,
             continue
         attrname, attrtype = ioattr[0], ioattr[1]
         #~ if attrname =='':
-        if hasattr(ob1, '_quantity_attr') and ob1._quantity_attr == attrname:
+        if hasattr(ob1, '_main_attr') and ob1._main_attr == attrname:
             # object is hinerited from Quantity (AnalogSIgnal, SpikeTrain, ...)
             try:
                 assert_arrays_almost_equal(ob1.magnitude, ob2.magnitude,
@@ -413,7 +413,7 @@ def assert_sub_schema_is_lazy_loaded(ob):
         attrname, attrtype = ioattr[0], ioattr[1]
         #~ print 'xdsd', classname, attrname
         #~ if attrname == '':
-        if hasattr(ob, '_quantity_attr') and ob._quantity_attr == attrname:
+        if hasattr(ob, '_main_attr') and ob._main_attr == attrname:
             assert ob.size == 0, \
                 'Lazy loaded error %s.size = %s' % (classname, ob.size)
             assert hasattr(ob, 'lazy_shape'), \
@@ -463,7 +463,7 @@ def assert_lazy_sub_schema_can_be_loaded(ob, io):
             'Object %s was not lazy loaded' % classname
         assert not hasattr(new_load, 'lazy_shape'), \
             'Newly loaded object from %s was also lazy loaded' % classname
-        if hasattr(ob, '_quantity_attr'):
+        if hasattr(ob, '_main_attr'):
             assert ob.lazy_shape == new_load.shape, \
                 'Shape of loaded object %sis not equal to lazy shape' % \
                 classname

@@ -145,7 +145,7 @@ def generate_diagram(filename, rect_pos, rect_width, figsize):
         ax.add_patch(rect)
 
         # name
-        if hasattr(obj, '_quantity_attr'):
+        if hasattr(obj, '_main_attr'):
             post = '* '
         else:
             post = ''
@@ -167,8 +167,8 @@ def generate_diagram(filename, rect_pos, rect_width, figsize):
         for i, attr in enumerate(obj._all_attrs):
             attrname, attrtype = attr[0], attr[1]
             t1 = attrname
-            if (hasattr(obj, '_quantity_attr') and
-                    obj._quantity_attr == attrname):
+            if (hasattr(obj, '_main_attr') and
+                    obj._main_attr == attrname):
                 t1 = attrname+'(object itself)'
             else:
                 t1 = attrname
