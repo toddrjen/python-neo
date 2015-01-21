@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
-'''
-This module defines :class:`Epoch`, an array of epochs. Introduced for
-performance reasons.
+"""
+This module defines :class:`Epoch`, an array of epochs.
 
-:class:`Epoch` derives from :class:`BaseNeo`, from
-:module:`neo.core.baseneo`.
-'''
+:class:`Epoch` derives from :class:`Event`, from
+:module:`neo.core.event`.
+"""
 
 # needed for python 3 compatibility
 from __future__ import absolute_import, division, print_function
@@ -13,18 +12,32 @@ from __future__ import absolute_import, division, print_function
 import sys
 
 import numpy as np
-import quantities as pq
 
-from neo.core.baseneo import BaseNeo, merge_annotations
+from neo.core.event import Event
 
 PY_VER = sys.version_info[0]
 
 
-class Epoch(BaseNeo):
-    '''
-    Array of epochs. Introduced for performance reason.
+def _new_epoch(cls, times=None, labels=None, durations=None, units=None,
+               dtype=None, copy=None, name=None, file_origin=None,
+               description=None, annotations=None):
+    """Map :meth:`Epoch.__new__` to a function that does not do unit checking.
 
-    An :class:`Epoch` is prefered to a list of :class:`Epoch` objects.
+    This is needed for pickle to work.
+    """
+    if annotations is None:
+        annotations = {}
+    return cls(times=times, labels=labels, durations=durations, units=units,
+               dtype=dtype, copy=copy, name=name, file_origin=file_origin,
+               description=description, **annotations)
+
+
+class Epoch(Event):
+
+    """One or more epochs.
+
+    Each epoch has with a time it occurs, an (optional) description,
+    and an (optional) duration.
 
     *Usage*::
 
@@ -58,74 +71,65 @@ class Epoch(BaseNeo):
     Note: Any other additional arguments are assumed to be user-specific
             metadata and stored in :attr:`annotations`,
 
-    '''
+    """
 
-    _single_parent_objects = ('Segment',)
-    _necessary_attrs = (('times', pq.Quantity, 1),
-                        ('durations', pq.Quantity, 1),
-                        ('labels', np.ndarray, 1, np.dtype('S')))
+    _necessary_attrs = (Event._necessary_attrs +
+                        (('labels', np.ndarray, 1, np.dtype('S')),))
+    _quantity_slice_attrs = ('durations',)
 
-    def __init__(self, times=None, durations=None, labels=None,
-                 name=None, description=None, file_origin=None, **annotations):
-        '''
-        Initialize a new :class:`Epoch` instance.
-        '''
-        BaseNeo.__init__(self, name=name, file_origin=file_origin,
-                         description=description, **annotations)
+    def __new__(cls, times=None, labels=None, durations=None, units=None,
+                dtype=None, copy=True, name=None, file_origin=None,
+                description=None, **annotations):
+        """Construct new :class:`Epoch` from data.
 
-        if times is None:
-            times = np.array([]) * pq.s
+        This is called whenever a new class:`Epoch` is created from
+        the constructor, but not when slicing.
+
+        __array_finalize__ is called on the new object.
+        """
+        obj = Event.__new__(cls, times=times, labels=labels, units=units,
+                            dtype=dtype, copy=copy, name=name,
+                            file_origin=file_origin,
+                            description=description)
+
         if durations is None:
-            durations = np.array([]) * pq.s
-        if labels is None:
-            labels = np.array([], dtype='S')
+            durations = np.zeros_like(obj.magnitude) * obj.units
+        elif not hasattr(durations, 'units'):
+            durations = durations * obj.units
+        else:
+            durations = durations.rescale(obj.units)
+        obj.durations = durations
 
-        self.times = times
-        self.durations = durations
-        self.labels = labels
+        return obj
 
-        self.segment = None
+    def __init__(self, times=None, labels=None, durations=None, units=None,
+                 dtype=None, copy=True, name=None, file_origin=None,
+                 description=None, **annotations):
+        """Initialize a newly constructed :class:`Epoch` instance.
+
+        This method is only called when constructing a new Epoch,
+        not when slicing or viewing. We use the same call signature
+        as __new__ for documentation purposes. Anything not in the call
+        signature is stored in annotations.
+        """
+        Event.__init__(self, times=times, labels=labels, units=units,
+                       dtype=dtype, copy=copy, name=name,
+                       file_origin=file_origin, description=description,
+                       **annotations)
+
+    @property
+    def _new_wrapper_args(self):
+        """Return a tuple of the arguments used to construct _new_wrapper."""
+        #      (times, labels, durations, units,
+        #       dtype, copy, name, file_origin,
+        #       description, **anotations)
+        return (np.array(self), self.labels, self.durations, self.units,
+                self.dtype, True, self.name, self.file_origin,
+                self.description, self.annotations)
 
     def __repr__(self):
-        '''
-        Returns a string representing the :class:`Epoch`.
-        '''
-        # need to convert labels to unicode for python 3 or repr is messed up
-        if PY_VER == 3:
-            labels = self.labels.astype('U')
-        else:
-            labels = self.labels
-
-        objs = ['%s@%s for %s' % (label, time, dur) for
-                label, time, dur in zip(labels, self.times, self.durations)]
+        """Return a string representing the :class:`Epoch`."""
+        # use _safe_labels or repr is messed up
+        objs = ['%s@%s for %s' % (label, time, dur) for label, time, dur in
+                zip(self._safe_labels, self.times, self.durations)]
         return '<Epoch: %s>' % ', '.join(objs)
-
-    def merge(self, other):
-        '''
-        Merge the another :class:`Epoch` into this one.
-
-        The :class:`Epoch` objects are concatenated horizontally
-        (column-wise), :func:`np.hstack`).
-
-        If the attributes of the two :class:`Epoch` are not
-        compatible, and Exception is raised.
-        '''
-        othertimes = other.times.rescale(self.times.units)
-        otherdurations = other.durations.rescale(self.durations.units)
-        times = np.hstack([self.times, othertimes]) * self.times.units
-        durations = np.hstack([self.durations,
-                               otherdurations]) * self.durations.units
-        labels = np.hstack([self.labels, other.labels])
-        kwargs = {}
-        for name in ("name", "description", "file_origin"):
-            attr_self = getattr(self, name)
-            attr_other = getattr(other, name)
-            if attr_self == attr_other:
-                kwargs[name] = attr_self
-            else:
-                kwargs[name] = "merge(%s, %s)" % (attr_self, attr_other)
-
-        merged_annotations = merge_annotations(self.annotations,
-                                               other.annotations)
-        kwargs.update(merged_annotations)
-        return Epoch(times=times, durations=durations, labels=labels, **kwargs)
