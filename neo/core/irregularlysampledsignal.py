@@ -25,7 +25,7 @@ from __future__ import absolute_import, division, print_function
 import numpy as np
 import quantities as pq
 
-from neo.core.baseneo import BaseNeo
+from neo.core.neoarray import NeoArray
 
 
 def _new_IrregularlySampledSignal(cls, times, signal, units=None, time_units=None, dtype=None,
@@ -40,7 +40,7 @@ def _new_IrregularlySampledSignal(cls, times, signal, units=None, time_units=Non
                file_origin=file_origin, **annotations)
 
 
-class IrregularlySampledSignal(BaseNeo, pq.Quantity):
+class IrregularlySampledSignal(NeoArray):
     '''
     An analog signal with samples taken at arbitrary time points.
 
