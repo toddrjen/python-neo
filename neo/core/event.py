@@ -1,11 +1,9 @@
 # -*- coding: utf-8 -*-
-'''
-This module defines :class:`Event`, an array of events. Introduced for
-performance reasons.
+"""This module defines :class:`Event`.
 
-:class:`Event` derives from :class:`BaseNeo`, from
-:module:`neo.core.baseneo`.
-'''
+:class:`Event` derives from :class:`NeoArray`, from
+:module:`neo.core.neoarray`.
+"""
 
 # needed for python 3 compatibility
 from __future__ import absolute_import, division, print_function
@@ -15,16 +13,30 @@ import sys
 import numpy as np
 import quantities as pq
 
-from neo.core.baseneo import BaseNeo, merge_annotations
+from neo.core.neoarray import NeoArray
 
 PY_VER = sys.version_info[0]
 
 
-class Event(BaseNeo):
-    '''
-    Array of events. Introduced for performance reasons.
+def _new_event(cls, times, labels=None, units=None, dtype=None, copy=None,
+               name=None, file_origin=None, description=None,
+               annotations=None):
+    """Map :meth:`Event.__new__` to a function that does not do unit checking.
 
-    An :class:`Event` is prefered to a list of :class:`Event` objects.
+    This is needed for pickle to work.
+    """
+    if annotations is None:
+        annotations = {}
+    return cls(times=times, labels=labels, units=units, dtype=dtype, copy=copy,
+               name=name, file_origin=file_origin, description=description,
+               **annotations)
+
+
+class Event(NeoArray):
+
+    """One or more events.
+
+    Each event has with a time it occurs and an (optional) description.
 
     *Usage*::
 
@@ -54,65 +66,91 @@ class Event(BaseNeo):
     Note: Any other additional arguments are assumed to be user-specific
             metadata and stored in :attr:`annotations`.
 
-    '''
+    """
 
-    _single_parent_objects = ('Segment',)
-    _necessary_attrs = (('times', pq.Quantity, 1),
-                        ('labels', np.ndarray, 1, np.dtype('S')))
+    _main_attr = 'times'
+    _single_parent_objects = ('Segment', 'Unit', 'RecordingChannel', 'Block')
+    _necessary_attrs = (('labels', np.ndarray, 1, np.dtype('S')),)
+    _ndarray_slice_attrs = ('labels',)
+    _required_dimensionality = pq.UnitTime
+    _new_wrapper = _new_event
 
-    def __init__(self, times=None, labels=None, name=None, description=None,
-                 file_origin=None, **annotations):
-        '''
-        Initialize a new :class:`Event` instance.
-        '''
-        BaseNeo.__init__(self, name=name, file_origin=file_origin,
-                         description=description, **annotations)
-        if times is None:
-            times = np.array([]) * pq.s
+    def __new__(cls, times, labels=None, units=None, dtype=None,
+                copy=True, name=None, file_origin=None, description=None,
+                **annotations):
+        """Construct new :class:`Event` from data.
+
+        This is called whenever a new class:`Event` is created from
+        the constructor, but not when slicing.
+
+        __array_finalize__ is called on the new object.
+        """
+        obj = NeoArray.__new__(cls, data=times, units=units,
+                               dtype=dtype, copy=copy, name=name,
+                               file_origin=file_origin,
+                               description=description)
+
         if labels is None:
-            labels = np.array([], dtype='S')
+            labels = np.array(['']*len(times), dtype='S')
+        obj.labels = labels
 
-        self.times = times
-        self.labels = labels
+        return obj
 
-        self.segment = None
+    def __init__(self, times, labels=None, units=None, dtype=None,
+                 copy=True, name=None, file_origin=None, description=None,
+                 **annotations):
+        """Initialize a newly constructed :class:`Event` instance.
+
+        This method is only called when constructing a new Event,
+        not when slicing or viewing. We use the same call signature
+        as __new__ for documentation purposes. Anything not in the call
+        signature is stored in annotations.
+        """
+        NeoArray.__init__(self, data=times, units=units, dtype=dtype,
+                          copy=copy, name=name, file_origin=file_origin,
+                          description=description, **annotations)
+
+    @property
+    def _new_wrapper_args(self):
+        """Return a tuple of the arguments used to construct _new_wrapper."""
+        #      (times, labels, units, dtype, copy,
+        #       name, file_origin, description,
+        #       **anotations)
+        return (np.array(self), self.labels, self.units, self.dtype, True,
+                self.name, self.file_origin, self.description,
+                self.annotations)
 
     def __repr__(self):
-        '''
-        Returns a string representing the :class:`Event`.
-        '''
-        # need to convert labels to unicode for python 3 or repr is messed up
-        if PY_VER == 3:
-            labels = self.labels.astype('U')
-        else:
-            labels = self.labels
-        objs = ['%s@%s' % (label, time) for label, time in zip(labels,
-                                                               self.times)]
+        """Return a string representing the :class:`Event`."""
+        # use _safe_labels or repr is messed up
+        objs = ['%s@%s' % (label, time) for label, time in
+                zip(self._safe_labels, self.times)]
         return '<Event: %s>' % ', '.join(objs)
 
-    def merge(self, other):
-        '''
-        Merge the another :class:`Event` into this one.
+    @property
+    def _safe_labels(self):
+        """Convert labels to unicode for python 3."""
+        if PY_VER == 3:
+            return self.labels.astype('U')
+        else:
+            return self.labels
 
-        The :class:`Event` objects are concatenated horizontally
-        (column-wise), :func:`np.hstack`).
+    @property
+    def t_start(self):
+        """Time when data begins."""
+        return np.min(self)
 
-        If the attributes of the two :class:`Event` are not
-        compatible, and Exception is raised.
-        '''
-        othertimes = other.times.rescale(self.times.units)
-        times = np.hstack([self.times, othertimes]) * self.times.units
-        labels = np.hstack([self.labels, other.labels])
-        kwargs = {}
-        for name in ("name", "description", "file_origin"):
-            attr_self = getattr(self, name)
-            attr_other = getattr(other, name)
-            if attr_self == attr_other:
-                kwargs[name] = attr_self
-            else:
-                kwargs[name] = "merge(%s, %s)" % (attr_self, attr_other)
+    @property
+    def duration(self):
+        """Signal duration."""
+        return self.t_stop - self.t_start
 
-        merged_annotations = merge_annotations(self.annotations,
-                                               other.annotations)
-        kwargs.update(merged_annotations)
-        return Event(times=times, labels=labels, **kwargs)
+    @property
+    def t_stop(self):
+        """Time when data ends."""
+        return np.min(self)
+
+    @property
+    def times(self):
+        """The time points of each sample of the data."""
+        return self
