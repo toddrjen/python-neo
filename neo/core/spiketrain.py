@@ -1,22 +1,9 @@
 # -*- coding: utf-8 -*-
-'''
-This module implements :class:`SpikeTrain`, an array of spike times.
+"""This module implements :class:`SpikeTrain`, an array of spike times.
 
-:class:`SpikeTrain` derives from :class:`BaseNeo`, from
-:module:`neo.core.baseneo`, and from :class:`quantites.Quantity`, which
-inherits from :class:`numpy.array`.
-
-Inheritance from :class:`numpy.array` is explained here:
-http://docs.scipy.org/doc/numpy/user/basics.subclassing.html
-
-In brief:
-* Initialization of a new object from constructor happens in :meth:`__new__`.
-This is where user-specified attributes are set.
-
-* :meth:`__array_finalize__` is called for all new objects, including those
-created by slicing. This is where attributes are copied over from
-the old object.
-'''
+:class:`SpikeTrain` derives from :class:`NeoArray`, from
+:module:`neo.core.neoarray`.
+"""
 
 # needed for python 3 compatibility
 from __future__ import absolute_import, division, print_function
@@ -24,49 +11,7 @@ from __future__ import absolute_import, division, print_function
 import numpy as np
 import quantities as pq
 
-from neo.core.baseneo import BaseNeo
-
-
-def check_has_dimensions_time(*values):
-    '''
-    Verify that all arguments have a dimensionality that is compatible
-    with time.
-    '''
-    errmsgs = []
-    for value in values:
-        dim = value.dimensionality
-        if (len(dim) != 1 or list(dim.values())[0] != 1 or
-                not isinstance(list(dim.keys())[0], pq.UnitTime)):
-            errmsgs.append("value %s has dimensions %s, not [time]" %
-                           (value, dim.simplified))
-    if errmsgs:
-        raise ValueError("\n".join(errmsgs))
-
-
-def _check_time_in_range(value, t_start, t_stop, view=False):
-    '''
-    Verify that all times in :attr:`value` are between :attr:`t_start`
-    and :attr:`t_stop` (inclusive.
-
-    If :attr:`view` is True, vies are used for the test.
-    Using drastically increases the speed, but is only safe if you are
-    certain that the dtype and units are the same
-    '''
-
-    if not value.size:
-        return
-
-    if view:
-        value = value.view(np.ndarray)
-        t_start = t_start.view(np.ndarray)
-        t_stop = t_stop.view(np.ndarray)
-
-    if value.min() < t_start:
-        raise ValueError("The first spike (%s) is before t_start (%s)" %
-                         (value, t_start))
-    if value.max() > t_stop:
-        raise ValueError("The last spike (%s) is after t_stop (%s)" %
-                         (value, t_stop))
+from neo.core.neoarray import NeoArray, _check_time_in_range
 
 
 def _new_spiketrain(cls, signal, t_stop, units=None, dtype=None,
@@ -74,10 +19,10 @@ def _new_spiketrain(cls, signal, t_stop, units=None, dtype=None,
                     t_start=0.0 * pq.s, waveforms=None, left_sweep=None,
                     name=None, file_origin=None, description=None,
                     annotations=None):
-    '''
-    A function to map :meth:`BaseAnalogSignal.__new__` to function that
-    does not do the unit checking. This is needed for :module:`pickle` to work.
-    '''
+    """Map SpikeTrain.__new__ to function that does not do the unit checking.
+
+    This is needed for pickle to work.
+    """
     if annotations is None:
         annotations = {}
     return SpikeTrain(signal, t_stop, units, dtype, copy, sampling_rate,
@@ -85,9 +30,9 @@ def _new_spiketrain(cls, signal, t_stop, units=None, dtype=None,
                       description, **annotations)
 
 
-class SpikeTrain(BaseNeo, pq.Quantity):
-    '''
-    :class:`SpikeTrain` is a :class:`Quantity` array of spike times.
+class SpikeTrain(NeoArray):
+
+    """:class:`SpikeTrain` is a :class:`Quantity` array of spike times.
 
     It is an ensemble of action potentials (spikes) emitted by the same unit
     in a period of time.
@@ -171,85 +116,52 @@ class SpikeTrain(BaseNeo, pq.Quantity):
         (along dimension 0). Note that t_start and t_stop are not changed
         automatically, although you can still manually change them.
 
-    '''
+    """
 
     _single_parent_objects = ('Segment', 'Unit')
     _main_attr = 'times'
-    _necessary_attrs = (('times', pq.Quantity, 1),
-                       ('t_start', pq.Quantity, 0),
-                       ('t_stop', pq.Quantity, 0))
+    _necessary_attrs = (('t_start', pq.Quantity, 0),
+                        ('t_stop', pq.Quantity, 0))
     _recommended_attrs = ((('waveforms', pq.Quantity, 3),
                            ('left_sweep', pq.Quantity, 0),
                            ('sampling_rate', pq.Quantity, 0)) +
-                          BaseNeo._recommended_attrs)
+                          NeoArray._recommended_attrs)
+    _ndarray_slice_attrs = ('waveforms',)
+    _required_dimensionality = pq.UnitTime
+    _new_wrapper = _new_spiketrain
+    _default_vals = {'_t_start': 0 * pq.s}
 
     def __new__(cls, times, t_stop, units=None, dtype=None, copy=True,
                 sampling_rate=1.0 * pq.Hz, t_start=0.0 * pq.s, waveforms=None,
                 left_sweep=None, name=None, file_origin=None, description=None,
                 **annotations):
-        '''
-        Constructs a new :clas:`Spiketrain` instance from data.
+        """Construct new :class:`SpikeTrain` from data.
 
-        This is called whenever a new :class:`SpikeTrain` is created from the
-        constructor, but not when slicing.
-        '''
-        # Make sure units are consistent
-        # also get the dimensionality now since it is much faster to feed
-        # that to Quantity rather than a unit
-        if units is None:
-            # No keyword units, so get from `times`
-            try:
-                units = times.units
-                dim = units.dimensionality
-            except AttributeError:
-                raise ValueError('you must specify units')
-        else:
-            if hasattr(units, 'dimensionality'):
-                dim = units.dimensionality
-            else:
-                dim = pq.quantity.validate_dimensionality(units)
+        This is called whenever a new class:`SpikeTrain` is created from
+        the constructor, but not when slicing.
 
-            if (hasattr(times, 'dimensionality') and
-                    times.dimensionality.items() != dim.items()):
-                if not copy:
-                    raise ValueError("cannot rescale and return view")
-                else:
-                    # this is needed because of a bug in python-quantities
-                    # see issue # 65 in python-quantities github
-                    # remove this if it is fixed
-                    times = times.rescale(dim)
+        __array_finalize__ is called on the new object.
+        """
+        # Construct Quantity from data
+        obj = NeoArray.__new__(cls, data=times, units=units, dtype=dtype,
+                               copy=copy, name=name, file_origin=file_origin,
+                               description=description, **annotations)
 
-        if dtype is None:
-            dtype = getattr(times, 'dtype', np.float)
-        elif hasattr(times, 'dtype') and times.dtype != dtype:
-            if not copy:
-                raise ValueError("cannot change dtype and return view")
-
+        if dtype is not None and hasattr(times.dtype) and times.dtype != dtype:
             # if t_start.dtype or t_stop.dtype != times.dtype != dtype,
             # _check_time_in_range can have problems, so we set the t_start
             # and t_stop dtypes to be the same as times before converting them
             # to dtype below
             # see ticket #38
-            if hasattr(t_start, 'dtype') and t_start.dtype != times.dtype:
-                t_start = t_start.astype(times.dtype)
-            if hasattr(t_stop, 'dtype') and t_stop.dtype != times.dtype:
-                t_stop = t_stop.astype(times.dtype)
-
-        # check to make sure the units are time
-        # this approach is orders of magnitude faster than comparing the
-        # reference dimensionality
-        if (len(dim) != 1 or list(dim.values())[0] != 1 or
-                not isinstance(list(dim.keys())[0], pq.UnitTime)):
-            ValueError("Unit %s has dimensions %s, not [time]" %
-                       (units, dim.simplified))
-
-        # Construct Quantity from data
-        obj = pq.Quantity.__new__(cls, times, units=dim, dtype=dtype,
-                                  copy=copy)
+            if hasattr(t_start, 'dtype') and t_start.dtype != obj.dtype:
+                t_start = t_start.astype(obj.dtype)
+            if hasattr(t_stop, 'dtype') and t_stop.dtype != obj.dtype:
+                t_stop = t_stop.astype(obj.dtype)
 
         # if the dtype and units match, just copy the values here instead
         # of doing the much more epxensive creation of a new Quantity
         # using items() is orders of magnitude faster
+        dim = obj.units.dimensionality
         if (hasattr(t_start, 'dtype') and t_start.dtype == obj.dtype and
                 hasattr(t_start, 'dimensionality') and
                 t_start.dimensionality.items() == dim.items()):
@@ -269,10 +181,6 @@ class SpikeTrain(BaseNeo, pq.Quantity):
         obj.left_sweep = left_sweep
         obj.sampling_rate = sampling_rate
 
-        # parents
-        obj.segment = None
-        obj.unit = None
-
         # Error checking (do earlier?)
         _check_time_in_range(obj, obj.t_start, obj.t_stop, view=True)
 
@@ -282,145 +190,38 @@ class SpikeTrain(BaseNeo, pq.Quantity):
                  copy=True, sampling_rate=1.0 * pq.Hz, t_start=0.0 * pq.s,
                  waveforms=None, left_sweep=None, name=None, file_origin=None,
                  description=None, **annotations):
-        '''
-        Initializes a newly constructed :class:`SpikeTrain` instance.
-        '''
-        # This method is only called when constructing a new SpikeTrain,
-        # not when slicing or viewing. We use the same call signature
-        # as __new__ for documentation purposes. Anything not in the call
-        # signature is stored in annotations.
+        """Initialize a newly constructed :class:`SpikeTrain` instance.
 
+        This method is only called when constructing a new SpikeTrain,
+        not when slicing or viewing. We use the same call signature
+        as __new__ for documentation purposes. Anything not in the call
+        signature is stored in annotations.
+        """
         # Calls parent __init__, which grabs universally recommended
         # attributes and sets up self.annotations
-        BaseNeo.__init__(self, name=name, file_origin=file_origin,
-                         description=description, **annotations)
+        NeoArray.__init__(self, data=times, units=units, dtype=dtype,
+                          copy=copy, name=name, file_origin=file_origin,
+                          description=description, **annotations)
 
-    def rescale(self, units):
-        '''
-        Return a copy of the :class:`SpikeTrain` converted to the specified
-        units
-        '''
-        if self.dimensionality == pq.quantity.validate_dimensionality(units):
-            return self.copy()
-        spikes = self.view(pq.Quantity)
-        return SpikeTrain(times=spikes, t_stop=self.t_stop, units=units,
-                          sampling_rate=self.sampling_rate,
-                          t_start=self.t_start, waveforms=self.waveforms,
-                          left_sweep=self.left_sweep, name=self.name,
-                          file_origin=self.file_origin,
-                          description=self.description, **self.annotations)
-
-    def __reduce__(self):
-        '''
-        Map the __new__ function onto _new_BaseAnalogSignal, so that pickle
-        works
-        '''
-        import numpy
-        return _new_spiketrain, (self.__class__, numpy.array(self),
-                                 self.t_stop, self.units, self.dtype, True,
-                                 self.sampling_rate, self.t_start,
-                                 self.waveforms, self.left_sweep,
-                                 self.name, self.file_origin, self.description,
-                                 self.annotations)
-
-    def __array_finalize__(self, obj):
-        '''
-        This is called every time a new :class:`SpikeTrain` is created.
-
-        It is the appropriate place to set default values for attributes
-        for :class:`SpikeTrain` constructed by slicing or viewing.
-
-        User-specified values are only relevant for construction from
-        constructor, and these are set in __new__. Then they are just
-        copied over here.
-
-        Note that the :attr:`waveforms` attibute is not sliced here. Nor is
-        :attr:`t_start` or :attr:`t_stop` modified.
-        '''
-        # This calls Quantity.__array_finalize__ which deals with
-        # dimensionality
-        super(SpikeTrain, self).__array_finalize__(obj)
-
-        # Supposedly, during initialization from constructor, obj is supposed
-        # to be None, but this never happens. It must be something to do
-        # with inheritance from Quantity.
-        if obj is None:
-            return
-
-        # Set all attributes of the new object `self` from the attributes
-        # of `obj`. For instance, when slicing, we want to copy over the
-        # attributes of the original object.
-        self.t_start = getattr(obj, 't_start', None)
-        self.t_stop = getattr(obj, 't_stop', None)
-        self.waveforms = getattr(obj, 'waveforms', None)
-        self.left_sweep = getattr(obj, 'left_sweep', None)
-        self.sampling_rate = getattr(obj, 'sampling_rate', None)
-        self.segment = getattr(obj, 'segment', None)
-        self.unit = getattr(obj, 'unit', None)
-
-        # The additional arguments
-        self.annotations = getattr(obj, 'annotations', None)
-
-        # Globally recommended attributes
-        self.name = getattr(obj, 'name', None)
-        self.file_origin = getattr(obj, 'file_origin', None)
-        self.description = getattr(obj, 'description', None)
-
-        if hasattr(obj, 'lazy_shape'):
-            self.lazy_shape = obj.lazy_shape
+    @property
+    def _new_wrapper_args(self):
+        """Return a tuple of the arguments used to construct _new_wrapper."""
+        #      (times, t_stop, units, dtype, copy,
+        #       sampling_rate, t_start, waveforms,
+        #       left_sweep, name, file_origin,
+        #       description, **anotations)
+        return (np.array(self), self.t_stop, self.units, self.dtype, True,
+                self.sampling_rate, self.t_start, self.waveforms,
+                self.left_sweep,  self.name, self.file_origin,
+                self.description, self.annotations)
 
     def __repr__(self):
-        '''
-        Returns a string representing the :class:`SpikeTrain`.
-        '''
+        """Return a string representing the :class:`SpikeTrain`."""
         return '<SpikeTrain(%s, [%s, %s])>' % (
             super(SpikeTrain, self).__repr__(), self.t_start, self.t_stop)
 
-    def sort(self):
-        '''
-        Sorts the :class:`SpikeTrain` and its :attr:`waveforms`, if any,
-        by time.
-        '''
-        # sort the waveforms by the times
-        sort_indices = np.argsort(self)
-        if self.waveforms is not None and self.waveforms.any():
-            self.waveforms = self.waveforms[sort_indices]
-
-        # now sort the times
-        # We have sorted twice, but `self = self[sort_indices]` introduces
-        # a dependency on the slicing functionality of SpikeTrain.
-        super(SpikeTrain, self).sort()
-
-    def __getslice__(self, i, j):
-        '''
-        Get a slice from :attr:`i` to :attr:`j`.
-
-        Doesn't get called in Python 3, :meth:`__getitem__` is called instead
-        '''
-        # first slice the Quantity array
-        obj = super(SpikeTrain, self).__getslice__(i, j)
-        # somehow this knows to call SpikeTrain.__array_finalize__, though
-        # I'm not sure how. (If you know, please add an explanatory comment
-        # here.) That copies over all of the metadata.
-
-        # update waveforms
-        if obj.waveforms is not None:
-            obj.waveforms = obj.waveforms[i:j]
-        return obj
-
-    def __getitem__(self, i):
-        '''
-        Get the item or slice :attr:`i`.
-        '''
-        obj = super(SpikeTrain, self).__getitem__(i)
-        if hasattr(obj, 'waveforms') and obj.waveforms is not None:
-            obj.waveforms = obj.waveforms.__getitem__(i)
-        return obj
-
     def __setitem__(self, i, value):
-        '''
-        Set the value the item or slice :attr:`i`.
-        '''
+        """Set the value of the item or slice :attr:`i`."""
         if not hasattr(value, "units"):
             value = pq.Quantity(value, units=self.units)
             # or should we be strict: raise ValueError("Setting a value
@@ -430,18 +231,23 @@ class SpikeTrain(BaseNeo, pq.Quantity):
         super(SpikeTrain, self).__setitem__(i, value)
 
     def __setslice__(self, i, j, value):
+        """Set the value of the slice :attr:`i`.
+
+        Doesn't get called in Python 3, :meth:`__setitem__` is called instead
+        """
         if not hasattr(value, "units"):
             value = pq.Quantity(value, units=self.units)
         _check_time_in_range(value, self.t_start, self.t_stop)
         super(SpikeTrain, self).__setslice__(i, j, value)
 
     def time_slice(self, t_start, t_stop):
-        '''
+        """Slice the :class:`SpikeTrain` by time.
+
         Creates a new :class:`SpikeTrain` corresponding to the time slice of
         the original :class:`SpikeTrain` between (and including) times
         :attr:`t_start` and :attr:`t_stop`. Either parameter can also be None
         to use infinite endpoints for the time interval.
-        '''
+        """
         _t_start = t_start
         _t_stop = t_stop
         if t_start is None:
@@ -460,49 +266,42 @@ class SpikeTrain(BaseNeo, pq.Quantity):
 
     @property
     def times(self):
-        '''
-        Returns the :class:`SpikeTrain` without modification or copying.
-        '''
+        """Return the :class:`SpikeTrain` without modification or copying."""
         return self
 
     @property
     def duration(self):
-        '''
-        Duration over which spikes can occur,
+        """Duration over which spikes can occur.
 
         (:attr:`t_stop` - :attr:`t_start`)
-        '''
+        """
         if self.t_stop is None or self.t_start is None:
             return None
         return self.t_stop - self.t_start
 
     @property
     def spike_duration(self):
-        '''
-        Duration of a waveform.
+        """Duration of a waveform.
 
         (:attr:`waveform`.shape[2] * :attr:`sampling_period`)
-        '''
+        """
         if self.waveforms is None or self.sampling_rate is None:
             return None
         return self.waveforms.shape[2] / self.sampling_rate
 
     @property
     def sampling_period(self):
-        '''
-        Interval between two samples.
+        """Interval between two samples.
 
         (1/:attr:`sampling_rate`)
-        '''
+        """
         if self.sampling_rate is None:
             return None
         return 1.0 / self.sampling_rate
 
     @sampling_period.setter
     def sampling_period(self, period):
-        '''
-        Setter for :attr:`sampling_period`
-        '''
+        """Setter for :attr:`sampling_period`."""
         if period is None:
             self.sampling_rate = None
         else:
@@ -510,11 +309,10 @@ class SpikeTrain(BaseNeo, pq.Quantity):
 
     @property
     def right_sweep(self):
-        '''
-        Time from the trigger times of the spikes to the end of the waveforms.
+        """Time from the trigger times to the end of the waveforms.
 
         (:attr:`left_sweep` + :attr:`spike_duration`)
-        '''
+        """
         dur = self.spike_duration
         if self.left_sweep is None or dur is None:
             return None
